@@ -1,0 +1,61 @@
+---
+- name: Deploy Application to Target Environment
+  hosts: "{{ target_env }}"
+  become: true
+  vars:
+    ecr_registry: "866771491971.dkr.ecr.ap-south-1.amazonaws.com"
+    aws_region: "ap-south-1"
+
+  tasks:
+    - name: Ensure destination database directory exists
+      file:
+        path: /opt/app/database
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0755'
+
+    - name: Copy database initialization script
+      copy:
+        src: ../database/init.sql
+        dest: /opt/app/database/init.sql
+        owner: ubuntu
+        group: ubuntu
+        mode: '0644'
+
+    - name: Copy production docker-compose file
+      copy:
+        src: ../docker-compose.prod.yml
+        dest: /opt/app/docker-compose.yml
+        owner: ubuntu
+        group: ubuntu
+        mode: '0644'
+
+    - name: Authenticate Docker to AWS ECR via IAM Instance Profile
+      shell: |
+        aws ecr get-login-password --region {{ aws_region }} | docker login --username AWS --password-stdin {{ ecr_registry }}
+      environment:
+        HOME: /root
+
+    - name: Pull and start containers with docker compose
+      shell: |
+        docker compose pull
+        docker compose up -d --remove-orphans
+      args:
+        chdir: /opt/app
+      environment:
+        IMAGE_TAG: "{{ image_tag }}"
+        APP_ENV: "{{ app_env }}"
+
+    - name: Wait for Spring Boot backend health check (HTTP 200)
+      uri:
+        url: http://localhost:8080/api/health
+        status_code: 200
+      register: health_result
+      until: health_result.status == 200
+      retries: 15
+      delay: 5
+
+    - name: Print deployed version status
+      debug:
+        msg: "Successfully deployed {{ image_tag }} to {{ app_env }} environment!"

@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  # 1. MySQL Database Container
+  mysql:
+    image: mysql:8.0
+    container_name: app-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: bluegreen_db
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "3306:3306"
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 2. Spring Boot Backend Container
+  backend:
+    image: 866771491971.dkr.ecr.ap-south-1.amazonaws.com/bluegreen-backend:${IMAGE_TAG:-v1.0.0}
+    container_name: app-backend
+    restart: always
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: bluegreen_db
+      DB_USER: root
+      DB_PASSWORD: rootpassword
+      APP_VERSION: ${IMAGE_TAG:-v1.0.0}
+      APP_ENV: ${APP_ENV:-BLUE}
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  # 3. React + Nginx Frontend Container (Listens on Host Port 80 for ALB)
+  frontend:
+    image: 866771491971.dkr.ecr.ap-south-1.amazonaws.com/bluegreen-frontend:${IMAGE_TAG:-v1.0.0}
+    container_name: app-frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - app-network
+
+volumes:
+  mysql_data:
+
+networks:
+  app-network:
+    driver: bridge
